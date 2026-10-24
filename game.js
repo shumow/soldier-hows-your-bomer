@@ -328,6 +328,72 @@ const SFX = {
   start:   () => { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => beep({ freq: f, dur: 0.12 }), i * 90)); },
 };
 
+// ---- Soundtrack ---------------------------------------------------------
+// Two mixes of "Marching Through the Pain". The title screen loops mix 1;
+// gameplay alternates between the two so a long run hears both. Browsers
+// refuse to start audio before a user gesture, so playback begins on the
+// first key press (see the keydown handler). M toggles music on and off.
+
+const MUSIC = {
+  tracks: [
+    { src: 'audio/marching-through-the-pain-mix-1.mp3', name: 'MIX 1' },
+    { src: 'audio/marching-through-the-pain-mix-2.mp3', name: 'MIX 2' },
+  ],
+  els: [],
+  current: -1,
+  unlocked: false,         // true once a key press has happened
+  enabled: localStorage.getItem('bomer.music') !== 'off',
+  volume: 0.55,
+  mode: 'title',           // 'title' (loop mix 1) or 'play' (alternate)
+  nowPlayingTimer: 0,
+};
+
+function initMusic() {
+  if (MUSIC.els.length) return;
+  MUSIC.els = MUSIC.tracks.map((t, i) => {
+    const a = new Audio(t.src);
+    a.preload = 'auto';
+    a.volume = MUSIC.volume;
+    a.addEventListener('ended', () => {
+      // In play mode, hand off to the other mix; in title mode, loop.
+      if (MUSIC.mode === 'play') playTrack((i + 1) % MUSIC.tracks.length);
+      else playTrack(i);
+    });
+    return a;
+  });
+}
+
+function playTrack(i) {
+  initMusic();
+  for (const a of MUSIC.els) { if (a !== MUSIC.els[i]) { a.pause(); a.currentTime = 0; } }
+  MUSIC.current = i;
+  if (!MUSIC.unlocked || !MUSIC.enabled) return;
+  setMusicVolume(MUSIC.volume); // also undoes any game-over ducking
+  const a = MUSIC.els[i];
+  const p = a.play();
+  if (p && p.catch) p.catch(() => { /* autoplay refused; retried on next key press */ });
+  MUSIC.nowPlayingTimer = 180;
+}
+
+function setMusicMode(mode) {
+  MUSIC.mode = mode;
+  // Title always starts mix 1; gameplay starts on mix 2 so the title song
+  // and the fight song differ, then they alternate.
+  playTrack(mode === 'title' ? 0 : 1);
+}
+
+function setMusicVolume(v) {
+  for (const a of MUSIC.els) a.volume = v;
+}
+
+function toggleMusic() {
+  MUSIC.enabled = !MUSIC.enabled;
+  try { localStorage.setItem('bomer.music', MUSIC.enabled ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  if (MUSIC.enabled) playTrack(MUSIC.current < 0 ? 0 : MUSIC.current);
+  else for (const a of MUSIC.els) a.pause();
+  showMessage(MUSIC.enabled ? 'MUSIC ON' : 'MUSIC OFF', 60);
+}
+
 /* ---------------------------------------------------------------------- */
 /* 5. Entities                                                             */
 /* ---------------------------------------------------------------------- */
@@ -429,10 +495,12 @@ function startGame() {
   game.shake = 0;
   showMessage('GO!', 60);
   SFX.start();
+  setMusicMode('play');
 }
 
 function endGame() {
   game.state = 'over';
+  setMusicVolume(MUSIC.volume * 0.4); // duck the music under the game-over screen
   if (game.score > game.best) {
     game.best = game.score;
     try { localStorage.setItem('bomer.best', String(game.best)); } catch (e) { /* ignore */ }
@@ -629,6 +697,8 @@ function updateSpawns() {
 }
 
 function update() {
+  if (justPressed.has('m')) toggleMusic();
+  if (MUSIC.nowPlayingTimer > 0) MUSIC.nowPlayingTimer--;
   if (game.state === 'title') {
     if (justPressed.has('Enter')) startGame();
     return;
@@ -817,7 +887,22 @@ function drawTitle() {
   ctx.fillRect(0, 96, W, 36);
   drawTextCentered('SHOOT ROBOTS. GRAB BLUE CELLS FOR AMMO.', 100, '#a8d4ff');
   drawTextCentered('MOVE: ARROWS/WASD  JUMP: SPACE  FIRE: J/X/Z', 110, '#8c8ca0');
-  if (game.best > 0) drawTextCentered('BEST ' + String(game.best).padStart(6, '0'), 122, '#ffd23f');
+  drawTextCentered('M: MUSIC ' + (MUSIC.enabled ? 'ON' : 'OFF'), 120, '#8c8ca0');
+  if (game.best > 0) drawTextCentered('BEST ' + String(game.best).padStart(6, '0'), 136, '#ffd23f');
+  drawNowPlaying();
+}
+
+// Small "now playing" tag in the bottom-right corner while a track starts.
+function drawNowPlaying() {
+  if (!MUSIC.enabled) {
+    drawText('MUSIC OFF', W - textWidth('MUSIC OFF') - 3, H - 9, '#8c8ca0');
+    return;
+  }
+  if (MUSIC.nowPlayingTimer <= 0 || MUSIC.current < 0) return;
+  const t = '> MARCHING THROUGH THE PAIN ' + MUSIC.tracks[MUSIC.current].name;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(W - textWidth(t) - 6, H - 11, textWidth(t) + 6, 11);
+  drawText(t, W - textWidth(t) - 3, H - 9, '#a8d4ff');
 }
 
 function drawGameOver() {
@@ -860,6 +945,7 @@ function render() {
   ctx.restore();
 
   drawHUD(game.player);
+  drawNowPlaying();
 
   if (game.state === 'over') drawGameOver();
   else if (game.paused) {
@@ -884,6 +970,10 @@ function normalizeKey(k) {
 
 window.addEventListener('keydown', (e) => {
   initAudio();
+  if (!MUSIC.unlocked) {
+    MUSIC.unlocked = true;
+    setMusicMode(game.state === 'play' ? 'play' : 'title');
+  }
   const k = normalizeKey(e.key);
   if (GAME_KEYS.has(k)) e.preventDefault(); // stop the page from scrolling
   if (!keys.has(k)) justPressed.add(k);
@@ -918,4 +1008,4 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 // Expose a little debug handle for the console / tests.
-window.__bomer = { game, startGame, PLAYER };
+window.__bomer = { game, startGame, PLAYER, MUSIC };
