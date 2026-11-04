@@ -12,7 +12,7 @@
  *   1. Config & helpers      5. Entities (player, robots, bullets, drops)
  *   2. Bitmap font           6. Game state / update
  *   3. Pixel-art sprites     7. Rendering
- *   4. Audio                 8. Input & main loop
+ *   4. Audio                 8. Input (keyboard + touch) & main loop
  * ========================================================================== */
 
 /* ---------------------------------------------------------------------- */
@@ -75,6 +75,7 @@ const FONT = {
   ':': [0x00,0x0C,0x0C,0x00,0x0C,0x0C,0x00], '=': [0x00,0x00,0x1F,0x00,0x1F,0x00,0x00],
   '!': [0x04,0x04,0x04,0x04,0x04,0x00,0x04], '-': [0x00,0x00,0x00,0x1F,0x00,0x00,0x00],
   '.': [0x00,0x00,0x00,0x00,0x00,0x0C,0x0C], '>': [0x08,0x04,0x02,0x01,0x02,0x04,0x08],
+  '<': [0x02,0x04,0x08,0x10,0x08,0x04,0x02],
   '/': [0x01,0x02,0x02,0x04,0x08,0x08,0x10], "'": [0x04,0x04,0x00,0x00,0x00,0x00,0x00],
   ',': [0x00,0x00,0x00,0x00,0x0C,0x04,0x08], '?': [0x0E,0x11,0x01,0x02,0x04,0x00,0x04],
 };
@@ -371,7 +372,7 @@ function playTrack(i) {
   setMusicVolume(MUSIC.volume); // also undoes any game-over ducking
   const a = MUSIC.els[i];
   const p = a.play();
-  if (p && p.catch) p.catch(() => { /* autoplay refused; retried on next key press */ });
+  if (p && p.catch) p.catch(() => { MUSIC.unlocked = false; /* autoplay refused; the next key press or tap retries */ });
   MUSIC.nowPlayingTimer = 180;
 }
 
@@ -414,6 +415,7 @@ function makeRobot(type, difficulty) {
     type, fromLeft,
     x: fromLeft ? -16 : W + 2,
     vx: 0, vy: 0, animTimer: 0, hitFlash: 0,
+    facing: fromLeft ? 1 : -1,   // +1 faces right, -1 faces left
     fireTimer: rand(60, 150),
   };
   if (type === 'walker') {
@@ -588,6 +590,7 @@ function updateRobots() {
     r.animTimer++;
     if (r.hitFlash > 0) r.hitFlash--;
     const towardX = Math.sign((p.x + p.w / 2) - (r.x + r.w / 2)) || 1;
+    r.facing = towardX; // keep facing the soldier even while standing still
 
     if (r.type === 'walker') {
       // Walk toward the player, stop and shoot when at mid range.
@@ -601,7 +604,8 @@ function updateRobots() {
           game.enemyBullets.push(makeEnemyBullet(r.x + r.w / 2, r.y + 8, p.x + p.w / 2, p.y + p.h / 2, 1.5 + diff * 0.1));
           SFX.laser();
         }
-        r.fireTimer = rand(110, 200) - diff * 8;
+        // Floor it so late-game robots never fire every frame.
+        r.fireTimer = Math.max(40, rand(110, 200) - diff * 8);
       }
     } else {
       // Drone: glide toward the player's x, bob vertically, fire down at them.
@@ -615,7 +619,7 @@ function updateRobots() {
       if (r.fireTimer <= 0) {
         game.enemyBullets.push(makeEnemyBullet(r.x + r.w / 2, r.y + r.h, p.x + p.w / 2, p.y + p.h / 2, 1.7 + diff * 0.1));
         SFX.laser();
-        r.fireTimer = rand(90, 160) - diff * 6;
+        r.fireTimer = Math.max(35, rand(90, 160) - diff * 6);
       }
     }
 
@@ -798,7 +802,7 @@ function drawRobot(r) {
   let name;
   if (r.type === 'walker') name = Math.floor(r.animTimer / 10) % 2 === 0 ? 'walker' : 'walker2';
   else name = 'drone';
-  const flip = r.vx > 0; // sprites face left by default; mirror when heading right
+  const flip = r.facing > 0; // sprites face left by default; mirror when facing right
   if (r.hitFlash > 0) {
     // White-out flash on hit: draw sprite, then overlay a white silhouette.
     drawSprite(name, r.x, r.y, flip);
@@ -881,28 +885,30 @@ function drawTitle() {
   drawSprite('drone', 190, 90 + Math.sin(renderFrame / 20) * 4);
   drawSprite('cell', 240, GROUND_Y - 9 + Math.round(Math.sin(renderFrame / 10) * 1.5));
 
-  if (Math.floor(renderFrame / 30) % 2 === 0) drawTextCentered('PRESS ENTER', 80, '#f8f8f8');
+  if (Math.floor(renderFrame / 30) % 2 === 0) drawTextCentered(touch.enabled ? 'TAP TO START' : 'PRESS ENTER', 80, '#f8f8f8');
   // Dark band so the instructions stay legible over the skyline.
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, 96, W, 36);
   drawTextCentered('SHOOT ROBOTS. GRAB BLUE CELLS FOR AMMO.', 100, '#a8d4ff');
-  drawTextCentered('MOVE: ARROWS/WASD  JUMP: SPACE  FIRE: J/X/Z', 110, '#8c8ca0');
-  drawTextCentered('M: MUSIC ' + (MUSIC.enabled ? 'ON' : 'OFF'), 120, '#8c8ca0');
+  drawTextCentered(touch.enabled ? 'PAD MOVES  TAP JUMP / FIRE BUTTONS' : 'MOVE: ARROWS/WASD  JUMP: SPACE  FIRE: J/X/Z', 110, '#8c8ca0');
+  drawTextCentered((touch.enabled ? 'TAP HERE: MUSIC ' : 'M: MUSIC ') + (MUSIC.enabled ? 'ON' : 'OFF'), 120, '#8c8ca0');
   if (game.best > 0) drawTextCentered('BEST ' + String(game.best).padStart(6, '0'), 136, '#ffd23f');
   drawNowPlaying();
 }
 
 // Small "now playing" tag in the bottom-right corner while a track starts.
 function drawNowPlaying() {
+  // Sits at the bottom edge, or above the touch buttons when those are shown.
+  const bottom = (touch.enabled && game.state === 'play') ? H - 42 : H;
   if (!MUSIC.enabled) {
-    drawText('MUSIC OFF', W - textWidth('MUSIC OFF') - 3, H - 9, '#8c8ca0');
+    drawText('MUSIC OFF', W - textWidth('MUSIC OFF') - 3, bottom - 9, '#8c8ca0');
     return;
   }
   if (MUSIC.nowPlayingTimer <= 0 || MUSIC.current < 0) return;
   const t = '> MARCHING THROUGH THE PAIN ' + MUSIC.tracks[MUSIC.current].name;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(W - textWidth(t) - 6, H - 11, textWidth(t) + 6, 11);
-  drawText(t, W - textWidth(t) - 3, H - 9, '#a8d4ff');
+  ctx.fillRect(W - textWidth(t) - 6, bottom - 11, textWidth(t) + 6, 11);
+  drawText(t, W - textWidth(t) - 3, bottom - 9, '#a8d4ff');
 }
 
 function drawGameOver() {
@@ -912,7 +918,7 @@ function drawGameOver() {
   drawTextCentered('SCORE ' + String(game.score).padStart(6, '0'), 80, '#f8f8f8');
   drawTextCentered('ROBOTS SCRAPPED: ' + game.kills, 92, '#c8c8d8');
   drawTextCentered('BEST ' + String(game.best).padStart(6, '0'), 104, '#ffd23f');
-  if (Math.floor(renderFrame / 30) % 2 === 0) drawTextCentered('PRESS ENTER TO RETRY', 130, '#f8f8f8');
+  if (Math.floor(renderFrame / 30) % 2 === 0) drawTextCentered(touch.enabled ? 'TAP TO RETRY' : 'PRESS ENTER TO RETRY', 130, '#f8f8f8');
 }
 
 let renderFrame = 0;
@@ -946,13 +952,14 @@ function render() {
 
   drawHUD(game.player);
   drawNowPlaying();
+  drawTouchControls();
 
   if (game.state === 'over') drawGameOver();
   else if (game.paused) {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, W, H);
     drawTextCentered('PAUSED', 80, '#f8f8f8', 2);
-    drawTextCentered('PRESS P TO RESUME', 104, '#c8c8d8');
+    drawTextCentered(touch.enabled ? 'TAP TO RESUME' : 'PRESS P TO RESUME', 104, '#c8c8d8');
   }
 }
 
@@ -968,12 +975,19 @@ function normalizeKey(k) {
   return k.length === 1 ? k.toLowerCase() : k;
 }
 
-window.addEventListener('keydown', (e) => {
+// Browsers only let audio start inside a user gesture, so both the keyboard
+// and touch handlers call this synchronously from their first event.
+function unlockAudio() {
   initAudio();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   if (!MUSIC.unlocked) {
     MUSIC.unlocked = true;
     setMusicMode(game.state === 'play' ? 'play' : 'title');
   }
+}
+
+window.addEventListener('keydown', (e) => {
+  unlockAudio();
   const k = normalizeKey(e.key);
   if (GAME_KEYS.has(k)) e.preventDefault(); // stop the page from scrolling
   if (!keys.has(k)) justPressed.add(k);
@@ -982,8 +996,135 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(normalizeKey(e.key)));
 window.addEventListener('blur', () => keys.clear());
 
+// ---- Touch controls -----------------------------------------------------
+// Phones and tablets get on-screen buttons. They write into the same `keys`
+// and `justPressed` sets as the keyboard, so the rest of the game never knows
+// where the input came from, and the keyboard keeps working alongside them.
+// Controls appear on devices whose primary pointer is coarse (a finger), and
+// on anything else the moment it receives its first touch.
+
+const touch = {
+  enabled: false,
+  active: new Map(),   // touch identifier -> key that finger is holding (or null)
+};
+
+// Logical-pixel hit boxes. Only the `play` buttons show during gameplay;
+// every other screen is "tap anywhere" (see touchKeyAt).
+const TOUCH_BUTTONS = [
+  { key: 'ArrowLeft',  label: '<',    x: 4,   y: 138, w: 36, h: 38, pad: true },
+  { key: 'ArrowRight', label: '>',    x: 44,  y: 138, w: 36, h: 38, pad: true },
+  { key: ' ',          label: 'JUMP', x: 236, y: 138, w: 38, h: 38 },
+  { key: 'j',          label: 'FIRE', x: 278, y: 138, w: 38, h: 38 },
+  { key: 'p',          label: '',     x: 148, y: 2,   w: 24, h: 12, pause: true },
+];
+const MUSIC_TAP = { x: 100, y: 114, w: 120, h: 14 }; // the "MUSIC ON/OFF" line on the title screen
+
+const inRect = (x, y, r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+
+function enableTouch() {
+  if (touch.enabled) return;
+  touch.enabled = true;
+  const hint = document.getElementById('hint');
+  if (hint) hint.textContent = 'TAP to start \u00b7 hold the pad to move \u00b7 JUMP / FIRE buttons \u00b7 keyboard still works';
+}
+
+// Translate a touch into logical canvas pixels.
+function touchPoint(t) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (t.clientX - rect.left) * W / rect.width, y: (t.clientY - rect.top) * H / rect.height };
+}
+
+// Which key a touch at (x, y) stands for right now, or null for none.
+function touchKeyAt(x, y) {
+  if (game.state === 'play' && !game.paused) {
+    for (const b of TOUCH_BUTTONS) if (inRect(x, y, b)) return b.key;
+    return null;
+  }
+  if (game.state === 'play' && game.paused) return 'p';          // tap anywhere to resume
+  if (game.state === 'title' && inRect(x, y, MUSIC_TAP)) return 'm';
+  return 'Enter';                                                 // title / game over: tap to start
+}
+
+function pressKey(k) {
+  if (!keys.has(k)) justPressed.add(k);
+  keys.add(k);
+}
+function releaseKey(k) {
+  for (const held of touch.active.values()) if (held === k) return; // another finger still holds it
+  keys.delete(k);
+}
+
+function onTouchStart(e) {
+  e.preventDefault();
+  enableTouch();
+  unlockAudio();
+  for (const t of e.changedTouches) {
+    const p = touchPoint(t);
+    const key = touchKeyAt(p.x, p.y);
+    touch.active.set(t.identifier, key);
+    if (key) pressKey(key);
+  }
+}
+
+function onTouchMove(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (!touch.active.has(t.identifier)) continue;
+    const prev = touch.active.get(t.identifier);
+    // Only the movement pad follows a sliding finger; buttons stay put.
+    if (prev !== 'ArrowLeft' && prev !== 'ArrowRight') continue;
+    const p = touchPoint(t);
+    const under = touchKeyAt(p.x, p.y);
+    const next = (under === 'ArrowLeft' || under === 'ArrowRight') ? under : null;
+    if (next === prev) continue;
+    touch.active.set(t.identifier, next);
+    releaseKey(prev);
+    if (next) pressKey(next);
+  }
+}
+
+function onTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const key = touch.active.get(t.identifier);
+    touch.active.delete(t.identifier);
+    if (key) releaseKey(key);
+  }
+}
+
+canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+// A coarse primary pointer means a phone or tablet. Touchscreen laptops keep
+// the keyboard layout until they are actually touched.
+if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) enableTouch();
+
+function drawTouchControls() {
+  if (!touch.enabled || game.state !== 'play' || game.paused) return;
+  const held = new Set(touch.active.values());
+  for (const b of TOUCH_BUTTONS) {
+    const down = held.has(b.key);
+    ctx.fillStyle = down ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.16)';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = down ? '#f8f8f8' : 'rgba(255,255,255,0.55)';
+    ctx.fillRect(b.x, b.y, b.w, 1); ctx.fillRect(b.x, b.y + b.h - 1, b.w, 1);
+    ctx.fillRect(b.x, b.y, 1, b.h); ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
+    if (b.pause) {
+      ctx.fillRect(b.x + 8, b.y + 3, 2, 6); ctx.fillRect(b.x + 14, b.y + 3, 2, 6);
+    } else {
+      const sc = b.pad ? 2 : 1;
+      drawText(b.label, b.x + (b.w - textWidth(b.label, sc)) / 2, b.y + (b.h - GLYPH_H * sc) / 2, '#f8f8f8', sc);
+    }
+  }
+}
+
 function fitCanvas() {
-  const scale = Math.max(1, Math.floor(Math.min(window.innerWidth / W, (window.innerHeight - 40) / H)));
+  const fit = Math.min(window.innerWidth / W, (window.innerHeight - 40) / H);
+  // Integer scaling keeps pixels crisp. On small screens (phones) an integer
+  // scale would waste most of the display, so fall back to a fractional fit.
+  const scale = fit >= 2 ? Math.floor(fit) : Math.max(0.5, fit);
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
 }
@@ -1008,4 +1149,4 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 // Expose a little debug handle for the console / tests.
-window.__bomer = { game, startGame, PLAYER, MUSIC };
+window.__bomer = { game, startGame, PLAYER, MUSIC, touch };

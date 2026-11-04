@@ -29,6 +29,18 @@ python3 -m http.server 8000
 | Start  | Enter                 |
 | Pause  | P or Escape           |
 | Music  | M (toggles on / off)  |
+| Touch  | On-screen pad and buttons (see below) |
+
+### Touch screens
+
+On a phone or tablet (any device whose primary pointer is a finger), the game
+draws its own controls on the canvas: a left/right pad in the bottom-left,
+JUMP and FIRE buttons in the bottom-right, and a small pause button at the
+top. Tap anywhere to start, retry, or resume. Tapping the MUSIC line on the
+title screen toggles the soundtrack. A device with both a touchscreen and a
+keyboard gets the buttons after its first touch, and the keyboard keeps
+working either way. Touch input feeds the same key state as the keyboard, so
+the game logic does not know which one you are using.
 
 ## How it works
 
