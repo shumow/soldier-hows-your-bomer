@@ -11,8 +11,12 @@ waves of robots, and an ammo economy built on blue circles.
 
 ## Play it
 
-No build step and no dependencies. Either open `index.html` directly in a
-browser, or serve the folder so the audio context behaves consistently:
+**Live:** <https://shumow.github.io/soldier-hows-your-bomer/> (works on
+phones too, with on-screen controls).
+
+To run it locally there is no build step and no dependencies. Either open
+`index.html` directly in a browser, or serve the folder so the audio context
+behaves consistently:
 
 ```sh
 python3 -m http.server 8000
